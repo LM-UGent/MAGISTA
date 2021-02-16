@@ -23,7 +23,8 @@ Before running MAGISTA, please make sure the following dependencies are fullfill
  You may need to select a mirror in the process
  
  If you run into trouble with the installation, please contact me at Gleb.Goussarov@sckcen.be
-
+### Install
+Once you have checked that all dependencies are met, simply go to the directory where this repositary is located nd run `setup.sh`
 ## Usage
 MAGISTA consists of two separate subprograms: MAGISTA.R and run_bin_analysis_noref.sh, both of which should be run from the command line.
 ### run_bin_analysis_noref.sh
