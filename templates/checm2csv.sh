@@ -1,0 +1,3 @@
+#!/usr/bin/bash
+cat $1 | grep -ve "^\[" | grep -v "^---" | perl -pe "s/[ ]+/\t/g" | perl -pe "s/\t\(/\(/g" | perl -pe "s/\#\t/#/g" | perl -pe "s/Marker\tlineage/checkm.Marker.lineage/" | perl -pe "s/#genomes/checkm.ngenomes/" |  perl -pe "s/#markers/checkm.nmarkers/" | perl -pe "s/#marker\tsets/checkm.nmarker.sets/" | perl -pe "s/Bin\tId/Bin.Id/" | perl -pe "s/Completeness/checkm.Completeness/" | perl -pe "s/Contamination/checkm.Contamination/" | perl -pe "s/marker\tsets/marker.sets/" | perl -pe "s/Strain\theterogeneity/checkm.Strain.heterogeneity/" | sed "s/\t/,/g" | sed "s/^,//g" | awk 'NR<2{print;next}{print| "sort "}' | cut -d , -f 1,2,3,4,5,12,13,14
+

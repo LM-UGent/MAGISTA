@@ -1,16 +1,16 @@
 require(randomForest)
 
 #do not add spacing to the following line
-MAGISTA_dir="~/Workspace/public/MAGISTA/"
+MAGISTA_dir="<<<MAGISTA_PATH>>>"
 
 
 # The following functions are adapted from the package mpm
 mpm.logtransf = function(data, logrepl = 1e-09){
     logrepl <- max(1e-09, logrepl)
     if (any(data <= 0, na.rm = TRUE)) {
-        warning(paste("Non-positive data replaced by", logrepl,
-                      "in computing mpm.logtransf"),
-                call. = FALSE)
+        #warning(paste("Non-positive data replaced by", logrepl,
+        #              "in computing mpm.logtransf"),
+        #        call. = FALSE)
         data[data <= 0] <- logrepl
     }
     return(log(data))
@@ -24,7 +24,7 @@ mpm.pca_axes = function(training_data){
     tmpData <- as.matrix(training_data)
     datavar = diag(var(tmpData))
     to_keep = (abs(datavar)>1e-09)
-    training_data = training_data[,to_keep]
+    training_data = training_data[,names(to_keep)]
 
 
     # remove variables which are perfectly correlated to eahc other
@@ -253,34 +253,143 @@ numeric_cols = function(data){
     }
     return(colnames(data)[which(result)])
 }
-cv.RFpredict = function(formula, data, folds, ...){
+cv.RFpredict = function(formula, data, folds, subgroup=NULL, ...){
     input_order = sample(nrow(data))
-    prediction = data.frame(value=numeric(length=nrow(data)))
-    rows_per_subset = ceiling(nrow(data)/folds)
-    for(i in 1:folds){
-        cat(".",file=stderr())
-        selected_rows = logical(length=nrow(data))
-        selected_rows[(rows_per_subset*(i-1)+1):min((rows_per_subset*(i)),nrow(data))] = TRUE
-        test_subset = data[selected_rows,]
-        train_subset = data[!selected_rows,]
-        tmpmodel = randomForest(formula,train_subset, ...)
-        tmpresult = predict(tmpmodel, test_subset)
-        prediction$value[selected_rows] = tmpresult
+    prediction = data.frame(value=numeric(length=nrow(data)),
+                            times_predicted=numeric(length=nrow(data)),
+                            fold_id=numeric(length=nrow(data)))
+    if(is.null(subgroup)){
+        rows_per_subset = ceiling(nrow(data)/folds)
+        cat("|",file=stderr())
+        for(i in 1:nfolds){
+            cat(" ",file=stderr())
+        }
+        cat("|\r|",file=stderr())
+        for(i in 1:folds){
+            cat(".",file=stderr())
+            selected_rows = logical(length=nrow(data))
+            selected_rows[(rows_per_subset*(i-1)+1):min((rows_per_subset*(i)),nrow(data))] = TRUE
+            test_subset = data[selected_rows,]
+            train_subset = data[!selected_rows,]
+            tmpmodel = randomForest(formula,train_subset, ...)
+            tmpresult = predict(tmpmodel, test_subset)
+            prediction$value[selected_rows] = tmpresult
+            prediction$times_predicted[selected_rows] = prediction$times_predicted[selected_rows]+1
+        }
+    } else {
+        usg=unique(subgroup)
+        if(length(usg)>1){
+            usg=sample(usg)
+        }
+        nsubgroups = length(usg)
+        nsubgroup_splits = min(folds,nsubgroups)
+        ignored_groups=max(c( (1.0*nsubgroups)/(1.0*nsubgroup_splits),1.0))
+        x=0
+        folds=1 #reduce folds to 1
+        x = nsubgroup_splits*folds
+        cat("|",file=stderr())
+        for(i in 1:x){
+            cat(" ",file=stderr())
+        }
+        cat("|\r|",file=stderr())
+        rows_per_subset = ceiling(nrow(data)/folds)
+        for(g in 1:nsubgroup_splits){
+            #the mask ensures that nsubgroup_splits groups are completely during each round of cross-validation
+            mask = logical(length=nrow(data))
+            first_test_group = as.integer(floor((g-1)*ignored_groups)+1)
+            last_test_group = as.integer(floor(g*ignored_groups))
+            for(j in first_test_group:last_test_group){
+                mask[subgroup==usg[j]]=TRUE
+            }
+            prediction$fold_id[mask]=g
+            for(i in 1:folds){
+                selected_rows = logical(length=nrow(data))
+                if(folds==1){
+                    selected_rows[1:nrow(data)] = FALSE
+                } else {
+                    selected_rows[(rows_per_subset*(i-1)+1):min((rows_per_subset*(i)),nrow(data))] = TRUE
+                }
+                selected_rows[mask] = TRUE
+                test_subset = data[selected_rows,]
+                train_subset = data[!selected_rows,]
+                tmpmodel = randomForest(formula,train_subset, ...)
+                tmpresult = predict(tmpmodel, test_subset)
+                prediction$value[selected_rows] = prediction$value[selected_rows] + tmpresult
+                prediction$times_predicted[selected_rows] = prediction$times_predicted[selected_rows]+1
+                cat("#",file=stderr())
+            }
+
+        }
+        prediction$value = prediction$value / prediction$times_predicted
     }
     cat("\n",file=stderr())
+    prediction = data.frame(value = prediction[,c("value")], fold_id = as.factor(prediction[,c("fold_id")]))
     return(prediction)
 }
 
+MAGISTA_error_plot = function(data,x,y,color, ...){
+    #textfamily="Arial"
+    textsize=20
+    data = data[complete.cases(data[,c(x,y)]),]
+    g = mean(data[complete.cases(data),y])
+    tmp_cor = cor(x=data[,x],y=data[,y],use = "complete.obs")
+    delta = data[,x]-data[,y]
+    SSE = sum(delta*delta, na.rm = T)
+    AE = sqrt(SSE/nrow(data))
+    R2 = table_rsquared(data[,y],data[,x],"model")
+    ex = paste("atop({{R^2}[x%~%y]}==",as.character(floor(R2*1000)/1000),",",
+               "{RMSE==",as.character(floor(AE*100)/100),"})",
+               sep="")
+
+    minx = 0
+    maxx = 100
+    miny = 0
+    maxy = 100
+    labelpos_x = minx+(maxx-minx)*0.7
+    labelpos_y = minx+(maxx-minx)*0.15
+    textdf = data.frame(x=c(labelpos_x),y=c(labelpos_y),t=c(ex))
+
+    return(
+            ggplot(data)+
+                geom_point(aes_string(x=x,y=y, color=color))+geom_abline(intercept=0,slope=1) +
+                geom_smooth(aes_string(x=x,y=y),method="lm", formula = y~x)+
+                geom_text(data=textdf,aes_string(x="x",y="y",label="t"),parse = T,size = textsize*0.35) +
+                xlim(c(0,100)) + ylim(c(0,100)) +
+                theme_bw()
+        )
+
+}
 
 # MAGISTA core functions
-train_MAGISTA = function(data, predictor_groups, targets, variables_to_ignore=c(), random_seed=123456){
+train_MAGISTA = function(data, predictor_groups, targets, variables_to_ignore=c(), random_seed=123456, error_plot_prefix=NULL){
     set.seed(random_seed)
     result = list()
     gnames = names(predictor_groups)
+    allbin_group=NULL
+    if("bin_group" %in% colnames(data)){
+        allbin_group = data$bin_group
+    }
+    dataset_color=character(length=nrow(data))
+    if("dataset" %in% colnames(data)){
+        dataset_color=data$dataset
+    }
     if(is.null(gnames)){
         gnames = paste("Subset",1:length(predictor_groups),sep=".")
     }
-
+    for(cn in colnames(data)){
+        if(length(grep("Rating",cn))>0){
+            for(v in unique(data[,cn])){
+                data[,paste(cn,as.character(v),sep=".")]=(data[,cn]==v)*1.0
+            }
+        }
+        if(length(grep("bin.part",cn))>0){
+            if("bin.size" %in% colnames(data)){
+                if(abs(max(data[,cn],na.rm=T))>1){
+                    data[,cn] = data[,cn]/data$bin.size
+                }
+            }
+        }
+    }
     vargroup_rating = numeric(length = length(predictor_groups))
     names(vargroup_rating) = gnames
     for(group in gnames){
@@ -289,8 +398,15 @@ train_MAGISTA = function(data, predictor_groups, targets, variables_to_ignore=c(
     }
     possible_ratings = sort(unique(vargroup_rating))
     res = list()
+    error_plot=F
+    if(!is.null(error_plot_prefix)){
+        error_plot=T
+        cat("error plot will be printed\n")
+        error_plot_prefix=as.character(error_plot_prefix)
+    }
     for(target in targets){
         curmodel = list()
+        bin_rating = character(length=nrow(data))
         for(rating in possible_ratings){
             cat(paste("Generating submodel : ",target, " [",rating,"]\n",sep=""),file=stderr())
             tcols = names(vargroup_rating)[vargroup_rating>=rating]
@@ -301,22 +417,46 @@ train_MAGISTA = function(data, predictor_groups, targets, variables_to_ignore=c(
             indata = data[,variables]
             rows2keep = complete.cases(indata)
             indata = indata[rows2keep,]
+            bin_rating[as.logical(rows2keep*(bin_rating==""))]=rating
+            bin_group=NULL
+            if(!is.null(allbin_group)){
+                bin_group=allbin_group[rows2keep]
+            }
             transformation = mpm.pca_axes(indata)
             train.fit = mpm.pca_predict(transformation, indata)
             indata = cbind(indata, train.fit)
             indata = cbind(data[rows2keep,target],indata)
             colnames(indata)[1] = target
-            rfm = randomForest(as.formula(paste(target,"~",".")),data = indata, na.action = na.omit, ntree = 200, maxnodes = 60)
+            rfm = randomForest(as.formula(paste(target,"~",".")),data = indata, na.action = na.omit, ntree = 200, maxnodes = 60, importance=TRUE, localImp = TRUE)
 
-            rf_contamination_model_cv = cv.RFpredict( as.formula(paste(target,"~",".")), data=indata, folds=10, na.action = na.omit, importance=T)
-            actual = data[rows2keep, target]
-            rf_correction = lm( actual ~ value, rf_contamination_model_cv, na.action = na.omit)
+            rf_model_cv = cv.RFpredict(as.formula(paste(target,"~",".")), data=indata, folds=10, na.action = na.omit, importance=T, subgroup=bin_group)
+            rf_model_cv$actual = data[rows2keep, target]
+            indata$predictionerror = rf_model_cv$actual - rf_model_cv$value
+
+            if(error_plot){
+                plot_data = data.frame(
+                    actual = rf_model_cv$actual,
+                    value = rf_model_cv$value,
+                    cv.pass = rf_model_cv$fold_id
+                )
+                ggsave(paste(error_plot_prefix,"err_profile",target,rating,"pdf",sep='.'),
+                       MAGISTA_error_plot(plot_data,x="actual",y="value",color="cv.pass")
+                )
+            }
+
+            errpred_model = randomForest(as.formula(paste("predictionerror ~ . -",target)),data = indata, na.action = na.omit, ntree = 200, maxnodes = 60, importance=TRUE, localImp = TRUE)
+            #rf_model_cv$error = predict(errpred_model,data=indata)
+
+            #rf_correction = lm( actual ~ poly(value,3), rf_model_cv, na.action = na.omit)
+            rf_correction = lm( actual ~ value, rf_model_cv, na.action = na.omit)
+            #rf_correction = lm( actual ~ value * error, rf_model_cv, na.action = na.omit)
 
             submodel = list(name=paste("R",rating,sep=""),
                             rating=rating,
                             incols=variables,
                             resname=target,
                             pcaxes=transformation,
+                            uncertainity_model=errpred_model,
                             correction=rf_correction,
                             model=rfm,
                             valuerange=c(min(data[rows2keep,target]),max(data[rows2keep,target])))
@@ -326,9 +466,24 @@ train_MAGISTA = function(data, predictor_groups, targets, variables_to_ignore=c(
     }
     return(res)
 }
+
 predict_MAGISTA = function(model, data){
     tvars = names(model)
     result = as.data.frame(matrix(nrow = nrow(data),ncol=length(model)+1))
+    for(cn in colnames(data)){
+        if(length(grep("Rating",cn))>0){
+            for(v in unique(data[,cn])){
+                data[,paste(cn,as.character(v),sep=".")]=(data[,cn]==v)*1.0
+            }
+        }
+        if(length(grep("bin.part",cn))>0){
+            if("bin.size" %in% colnames(data)){
+                if(abs(max(data[,cn],na.rm=T))>1){
+                    data[,cn] = data[,cn]/data$bin.size
+                }
+            }
+        }
+    }
     colnames(result)[1:length(model)] = names(model)
     colnames(result)[length(model)+1] = "rating"
     for(target in colnames(result)[1:length(model)]){
@@ -347,10 +502,26 @@ predict_MAGISTA = function(model, data){
                 indata = data[torun,]
                 cname = names(ratings)[which(ratings==rating)]
                 submodel = model[[target]][[cname]]
+                missing_cols = !(model[[target]][[cname]]$pcaxes$columns %in% colnames(indata))
+                if(any(missing_cols)){
+                    stop(paste("missing columns:",paste(model[[target]][[cname]]$pcaxes$columns[missing_cols],collapse = ",")))
+                }
                 train.fit = mpm.pca_predict(submodel$pcaxes, indata)
                 indata = cbind(indata, train.fit)
+
+                missing_cols = !(rownames(model[[target]][[cname]]$model$importance) %in% colnames(indata))
+                if(any(missing_cols)){
+                    stop(paste("missing columns:",paste(model[[target]][[cname]]$uncertainity_model$columns[missing_cols],collapse = ",")))
+                }
+
+                missing_cols = !(rownames(model[[target]][[cname]]$model$importance) %in% colnames(indata))
                 resvalues = predict(submodel$model, indata)
-                df = data.frame(value = resvalues)
+                if(cname %in% colnames(indata)){
+                    indata$predictionerror = predict(submodel$uncertainity_model,indata)
+                } else {
+                    indata$predictionerror = NaN
+                }
+                df = data.frame(value = resvalues,error=indata$predictionerror)
                 resvalues = predict(submodel$correction, df)
                 resvalues[resvalues < submodel$valuerange[1]] = submodel$valuerange[1]
                 resvalues[resvalues > submodel$valuerange[2]] = submodel$valuerange[2]
@@ -374,6 +545,8 @@ MAGISTA_prepare_generic = function(modeltype, training_dataname,name){
     cols_m4c = colnames_containing_pattern(training_data,"w10k_m4c.",fixed=T)
     cols_k4s = colnames_containing_pattern(training_data,"w50k_k4s.",fixed=T)
     if (modeltype=="MAGISTIC"){
+        #include the depth to which checkM has reached as a usable value
+        training_data$checkm.SpecificityRating=8-as.integer(factor(gsub("root.*","d",gsub("__.*","",training_data$checkm.Marker.lineage)),levels=c("s","g","f","o","c","p","k","d")))
         cols_checkm = colnames_containing_pattern(training_data,"checkm.",fixed=T)
         cols_checkm = cols_checkm[ sapply(training_data[1,cols_checkm],is.numeric)]
     }
@@ -410,7 +583,7 @@ MAGISTA_testrun = function(){
     require(dplyr)
     cat("Beginning Test Run\n", file=stdout())
     cat(paste("Temporarily changed working directory to: ", MAGISTA_dir,"data/\n",sep=""),file=stderr())
-    setwd(paste(MAGISTA_dir,"data/",sep=""))
+    setwd(paste(MAGISTA_dir,"/data/",sep=""))
     if(!file.exists("MAGISTA.default.RData")){
         MAGISTA_prepare("training_dataset.csv",name="default")
         cat("MAGISTA Model ready\n",file=stderr())
@@ -481,7 +654,7 @@ MAGISTIC_run = function(infile,outfile=paste(gsub(".csv","",gsub("_input","",inf
 args = commandArgs(trailingOnly=TRUE)
 
 proper_input=T
-cat("This is MAGISTA v0.1\n", file=stderr())
+cat("This is MAGISTA v0.2\n", file=stderr())
 cat("Supplied arguments:\n  ", file=stderr())
 cat(paste(args,collapse=","), file=stderr())
 cat("\n", file=stderr())
