@@ -1,4 +1,6 @@
 # MAGISTA
+The MAGISTA software is intended to give de-novo evaluation of MAG (metagenome-assembled genome) quality. It estimates completeness and purity of MAGs using a random forest-based approach.
+
 ## Dependencies
 Required:
  - python (you will likely have trouble if you do not use 3.6 to run both checkM and AMBER)
@@ -21,10 +23,6 @@ Rscript ./MAGISTA.R FIRSTRUN
 
 
 Installation is currently not completely tested - please report any trouble that you have with installation to g_goussarov@hotmail.com.
-
-# MAGISTA
-
-The MAGISTA software is intended to give de-novo evaluation of MAG (metagenome-assembled genome) quality. It estimates completeness and purity of MAGs using a random forest-based approach.
 
 ## Usage
 MAGISTA consists of two separate subprograms: MAGISTA.R and run_bin_analysis.sh, both of which should be run from the command line.

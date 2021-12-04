@@ -1,3 +1,6 @@
+# This file is licensed under GPLv2 (see LICENSE for further information)
+# This file contains adapted versions of functions present in the mpm package, written by Luc Wouters
+# See https://cran.r-project.org/web/packages/mpm/index.html for the original library
 require(randomForest)
 
 #do not add spacing to the following line
